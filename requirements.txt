@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+pymongo
+python-multipart
+aiofiles
+pylance
+BaseModel
+python-dotenv
+openai
