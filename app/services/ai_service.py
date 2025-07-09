@@ -8,18 +8,39 @@ from fastapi import UploadFile
 # AI + Sanity Audit Service
 import openai  # Make sure to install openai package if not already
 from config import OPENAI_API_KEY
-
+    
 
 # Added later
-from app.utils.mongo_helper import get_case_data_by_id
-from app.utils.sanity_check import run_sanity_checks
-from app.services.rule_engine import apply_rules_to_case
-# from app.services.llm_engine import call_llm_for_analysis
+from app.utils.mongo_helper import get_all_rules, get_case_data_by_id
 
-
+# from app.services.rule_engine import apply_rules_to_case
+from .llm_engine import call_llm_for_analysis
 import os
 import openai  # Make sure openai package is installed
 from app.utils.prompt_templates import get_llm_prompt
+from .rule_engine import apply_rules_to_case
+from .llm_engine import call_llm_for_analysis 
+from .file_parser import parse_uploaded_files
+from app.utils.mongo_helper import store_case_metadata
+
+# from .rule_engine import apply_rules_to_case
+# from services.llm_engine import call_llm_for_analysis
+# from utils.mongo_helper import store_case_metadata
+
+
+
+# from app.utils.sanity_check import run_sanity_checks
+# from app.services.file_parser import parse_uploaded_case
+# from app.utils.rule_engine import apply_rules_to_case
+# from app.services.ai_service import call_llm_for_analysis
+# This method is at two places, in the ai_service.py and llm_engine.
+
+# from .rule_engine import apply_rules_to_case
+# from app.services.llm_engine import call_llm_for_analysis
+
+ # This method is at two places, in the ai_service.py and llm_engine.py 
+
+ # from app.utils.sanity_check import run_sanity_checks
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -121,8 +142,8 @@ def perform_basic_sanity_checks(metadata: dict) -> List[str]:
     if "zip" in metadata and len(str(metadata["zip"])) != 5:
         issues.append("ZIP code is not 5 digits.")
     # Add more such common sense rules...
-
     return issues
+
 
 def generate_llm_feedback(metadata: dict, context: str) -> str:
     prompt = f"""
@@ -149,6 +170,8 @@ def generate_llm_feedback(metadata: dict, context: str) -> str:
 
     return response.choices[0].message.content.strip()
 
+
+# This method is not used anywhere in the codebase, but we can use it in the future
 def audit_uploaded_case(case_id: str):
     case = cases_col.find_one({"_id": case_id})
     if not case:
@@ -170,6 +193,8 @@ def audit_uploaded_case(case_id: str):
 
 # Added later
 # Main analysis function that combines all steps
+# This method is not used anywhere in the codebase, but we can use it in the future
+# For now we are not using this method anywhere in the codebase
 async def analyze_case(case_id: str) -> dict:
     # Step 1: Fetch parsed case data from MongoDB
     case_data = get_case_data_by_id(case_id)
@@ -179,7 +204,7 @@ async def analyze_case(case_id: str) -> dict:
     response = {"case_id": case_id, "status": "success", "results": {}}
 
     # Step 2: Run sanity checks
-    sanity_issues = run_sanity_checks(case_data.get("parsed_data", {}))
+    sanity_issues = perform_basic_sanity_checks(case_data.get("parsed_data", {}))
     response["results"]["sanity_checks"] = sanity_issues
 
     # Step 3: Apply user-defined rules
@@ -195,32 +220,169 @@ async def analyze_case(case_id: str) -> dict:
 
 
 
-def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
+# def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
+#     """
+#     Sends case data and rule violations to LLM for deeper analysis & intelligent reasoning.
+#     Returns a structured LLM response with explanation.
+#     """
+#     prompt = get_llm_prompt(parsed_data, violations)
+
+#     try:
+#         response = openai.ChatCompletion.create(
+#             model="gpt-4",  # You can swap for "gpt-4o", "gpt-3.5-turbo", or "mistral" if custom
+#             messages=[
+#                 {"role": "system", "content": "You are an intelligent fraud/error analysis assistant."},
+#                 {"role": "user", "content": prompt}
+#             ],
+#             temperature=0.3,
+#             max_tokens=800
+#         )
+
+#         result = response["choices"][0]["message"]["content"]
+#         return {
+#             "status": "success",
+#             "llm_output": result
+#         }
+
+#     except Exception as e:
+#         return {
+#             "status": "error",
+#             "message": str(e)
+#         }
+    
+
+# def process_case_for_analysis(case_id: str, parsed_data: dict) -> dict:
+#     """
+#     This function chains together the steps:
+#     1. Run rule engine
+#     2. Pass result + parsed data to LLM
+#     3. Return a combined report
+#     """
+#     # Step 1: Apply rules
+#     violations = apply_rules_to_case(parsed_data)
+
+#     # Step 2: LLM Analysis
+#     ai_result = call_llm_for_analysis(parsed_data, violations)
+
+#     # Step 3: Combine results
+#     return {
+#         "case_id": case_id,
+#         "rule_violations": violations,
+#         "ai_result": ai_result
+#     }
+
+
+
+
+# ai_service.py
+
+
+# async def process_case_for_analysis(case_id, user_id, documents=None, metadata=None, context=""):
+#     """
+#     Main pipeline to parse files, apply rules, call LLM, and store results.
+#     """
+#     # 1. Parse file uploads (if any)
+#     parsed_data = await parse_uploaded_files(documents) if documents else {}
+
+#     # 2. Merge with manual metadata if provided
+#     full_case_data = {**parsed_data, **(metadata or {})}
+
+#     # 3. Apply sanity rules or hardcoded checks
+#     rule_based_flags = apply_rules_to_case(full_case_data)
+
+#     # 4. Call LLM with the merged metadata and context
+#     llm_output = call_llm_for_analysis(full_case_data, context=context)
+
+#     # 5. Store everything in MongoDB
+#     store_case_metadata(
+#         case_id=case_id,
+#         user_id=user_id,
+#         metadata=full_case_data,
+#         llm_output=llm_output,
+#         rule_flags=rule_based_flags,
+#         context=context
+#     )
+
+#     return {
+#         "status": "completed",
+#         "rules_detected": rule_based_flags,
+#         "llm_analysis": llm_output
+#     }
+
+
+
+# services/ai_service.py
+# from services.file_parser import parse_uploaded_files
+
+async def process_case_for_analysis(case_input: dict):
+    metadata = case_input.get("metadata", {})
+    files = case_input.get("documents", [])
+
+    extracted_fields = await parse_uploaded_files(files)
+    metadata.update(extracted_fields)
+
+    rule_result = apply_rules_to_case(metadata)
+    # llm_result = call_llm_for_analysis(metadata)
+    rules = get_all_rules()
+
+    llm_result = call_llm_for_analysis(metadata, rules)
+
+    case_record = {}
+    case_record["llm_review"] = {
+        "llm_flagged": llm_result.get("is_suspicious"),
+        "llm_reason": llm_result.get("explanation"),
+        "admin_verified": None,
+        "admin_feedback": None
+    }
+
+    store_case_metadata(case_input["case_id"], case_input["user_id"], metadata, rule_result, llm_result)
+
+    return {
+        "status": "completed",
+        "rules_checked": rule_result,
+        "ai_analysis": llm_result
+    }
+
+
+
+
+
+# ai_service.py
+
+# from .llm_engine import call_llm_for_analysis
+# This method is not used anywhere in the codebase, but we can use it in the future
+async def audit_training_case_with_llm(case_data: dict) -> dict:
     """
-    Sends case data and rule violations to LLM for deeper analysis & intelligent reasoning.
-    Returns a structured LLM response with explanation.
+    Uses LLM to validate admin-uploaded case (even if marked 'good').
+    Adds flags if anomalies are found.
     """
-    prompt = get_llm_prompt(parsed_data, violations)
 
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",  # You can swap for "gpt-4o", "gpt-3.5-turbo", or "mistral" if custom
-            messages=[
-                {"role": "system", "content": "You are an intelligent fraud/error analysis assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=800
-        )
+    llm_result = await call_llm_for_analysis(case_data)
 
-        result = response["choices"][0]["message"]["content"]
-        return {
-            "status": "success",
-            "llm_output": result
-        }
+    audit_summary = {
+        "llm_flagged": False,
+        "issues": [],
+        "notes": ""
+    }
 
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+    if llm_result.get("issues_found"):
+        audit_summary["llm_flagged"] = True
+        audit_summary["issues"] = llm_result["issues_found"]
+        audit_summary["notes"] = "LLM flagged potential inconsistencies in admin-marked case."
+
+    return audit_summary
+
+
+# This method is not used anywhere in the codebase, but we can use it in the future
+async def process_admin_training_case(case_data):
+    # Step 1: LLM audit
+    audit_report = call_llm_for_analysis(case_data)
+
+    # Step 2: Don't store yet — return findings
+    return {
+        "status": "audit_complete",
+        "llm_flagged": audit_report["flagged"],
+        "llm_reasoning": audit_report["reasoning"],
+        "case_data": case_data,
+        "awaiting_admin_feedback": True
+    }

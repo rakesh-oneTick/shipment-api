@@ -14,6 +14,7 @@ class FeedbackInput(BaseModel):
     feedback_text: Optional[str] = None
     timestamp: Optional[datetime] = None
 
+# This method is not used anywhere in the codebase, but we can use it in the future
 def store_user_feedback(feedback: FeedbackInput):
     record = {
         "case_id": feedback.case_id,

@@ -2,6 +2,10 @@ import json
 from typing import Union
 from fastapi import UploadFile
 
+from fastapi import UploadFile
+from typing import List
+
+
 # Placeholder OCR function
 async def parse_document(file: UploadFile) -> dict:
     filename = file.filename.lower()
@@ -35,3 +39,19 @@ async def parse_document(file: UploadFile) -> dict:
             "length": len(contents),
             "raw_text": contents.decode(errors='ignore')[:500]  # limit preview
         }
+    
+
+async def parse_uploaded_files(files: List[UploadFile]):
+    parsed_output = []
+
+    for file in files:
+        content = await file.read()
+        # Placeholder parse logic
+        parsed_output.append({
+            "filename": file.filename,
+            "parsed_content": f"Mock parsed text from {file.filename}",
+            "size": len(content)
+        })
+
+    return parsed_output
+
