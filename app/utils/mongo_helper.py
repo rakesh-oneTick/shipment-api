@@ -1,24 +1,18 @@
 from pymongo import MongoClient
-
-
 from datetime import datetime
-# from bson import ObjectId
-# from pymongo import MongoClient
 from fastapi import UploadFile
 from typing import List, Optional
 
 from pymongo import DESCENDING
 from app.models.rule_model import RuleResult
-# from pymongo import MongoClient
-# from pymongo import MongoClient
-# from pymongo import MongoClient   
 
 # 🔌 Setup Mongo client (make sure it's consistent with other parts of your app)
 client = MongoClient("mongodb://localhost:27017")
 db = client["case_management"]
 parsed_cases_collection = db["parsed_cases"]
 rules_collection = db["reference_rules"]  # Assuming you have a collection for rules
-
+cases_collection = db["uploaded_cases"]
+training_collection = db["training_cases"]
 
 
 #  This is a sample function to fetch all rules from the database.
@@ -27,11 +21,6 @@ rules_collection = db["reference_rules"]  # Assuming you have a collection for r
 def get_all_rules():
     return list(rules_collection.find({}, {"_id": 0}));
 
-
-
-# client = MongoClient("mongodb://localhost:27017")
-# db = client["case_management"]
-cases_collection = db["uploaded_cases"]
 
 def get_case_data_by_id(case_id: str):
     """
@@ -50,12 +39,7 @@ def insert_case_data(data: dict):
     return result.inserted_id
 
 
-
-
-# Mongo setup
-# client = MongoClient("mongodb://localhost:27017")
-# cases_collection = db["uploaded_cases"]
-
+# Used in upload_case in process_case_for_analysis in ai_service.py
 async def store_case_metadata(
     user_id: str,
     context: Optional[str],
@@ -83,16 +67,6 @@ async def store_case_metadata(
     result = cases_collection.insert_one(case_record)
     return str(result.inserted_id)
 
-
-# client = MongoClient("mongodb://localhost:27017")
-# db = client["case_management"]
-# cases_collection = db["uploaded_cases"]
-
-# mongo_helper.py
-
-# client = MongoClient("mongodb://localhost:27017")
-# db = client["case_management"]
-# cases_collection = db["uploaded_cases"]
 
 def get_training_cases(limit=50):
     """
@@ -123,6 +97,7 @@ def fetch_recent_feedback_entries(limit: int = 20):
     return list(entries)
 
 
+# used in upload_case in app/routes/user_routes.py
 def attach_llm_result_to_case(case_id: str, result: RuleResult):
     cases_collection.update_one(
         {"case_id": case_id},
@@ -151,3 +126,26 @@ def store_llm_feedback(feedback_data: dict):
 
 def get_all_cases() -> list:
     return list(cases_collection.find({}))
+
+def store_case_with_audit(case_id: str,
+                        #   uploader: str,
+                          parsed_data: dict,
+                          rule_results: dict,
+                          llm_verdict: str,
+                          llm_reason: str):
+    
+    record = {
+        "case_id": case_id,
+        # "uploader": uploader,
+        "parsed_data": parsed_data,
+        "rule_results": rule_results,
+        "ai_verdict": {
+            "decision": llm_verdict,
+            "reason": llm_reason
+        },
+        "audited_by_ai": True,
+        "timestamp": datetime.utcnow()
+    }
+
+    result = training_collection.insert_one(record)
+    return str(result.inserted_id)

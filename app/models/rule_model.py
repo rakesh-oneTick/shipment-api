@@ -11,7 +11,7 @@ class LLMFeedback(BaseModel):
     ai_decision: str  # e.g., "good" or "bad"
     admin_decision: str  # "agree", "disagree"
     reason: Optional[str] = None  # Optional explanation from admin
-    timestamp: Optional[str] = None
+    # timestamp: Optional[str] = None
 
 
 class RuleResult(BaseModel):

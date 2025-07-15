@@ -7,40 +7,21 @@ from typing import Optional, List
 from fastapi import UploadFile
 # AI + Sanity Audit Service
 import openai  # Make sure to install openai package if not already
+from app.services.llm_model import query_llm
 from config import OPENAI_API_KEY
     
 
 # Added later
 from app.utils.mongo_helper import get_all_rules, get_case_data_by_id
 
-# from app.services.rule_engine import apply_rules_to_case
-from .llm_engine import call_llm_for_analysis
+from .llm_engine import simulate_llm_logic
 import os
 import openai  # Make sure openai package is installed
 from app.utils.prompt_templates import get_llm_prompt
 from .rule_engine import apply_rules_to_case
-from .llm_engine import call_llm_for_analysis 
 from .file_parser import parse_uploaded_files
 from app.utils.mongo_helper import store_case_metadata
 
-# from .rule_engine import apply_rules_to_case
-# from services.llm_engine import call_llm_for_analysis
-# from utils.mongo_helper import store_case_metadata
-
-
-
-# from app.utils.sanity_check import run_sanity_checks
-# from app.services.file_parser import parse_uploaded_case
-# from app.utils.rule_engine import apply_rules_to_case
-# from app.services.ai_service import call_llm_for_analysis
-# This method is at two places, in the ai_service.py and llm_engine.
-
-# from .rule_engine import apply_rules_to_case
-# from app.services.llm_engine import call_llm_for_analysis
-
- # This method is at two places, in the ai_service.py and llm_engine.py 
-
- # from app.utils.sanity_check import run_sanity_checks
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -65,13 +46,16 @@ async def read_files(files: Optional[List[UploadFile]]) -> List[dict]:
             })
     return documents
 
+# This method is not used anywhere in the codebase, but we can use it in the future
+# This method only used in the process_user_case method and that method is not used anywhere in the code
 def store_case_record(data: dict):
     data["upload_time"] = datetime.utcnow()
     result = cases_col.insert_one(data)
     return str(result.inserted_id)
 
-# ----- Core Services -----
 
+
+# This method is not used anywhere in the codebase, but we can use it in the future
 async def process_user_case(user_id: str, case_id: str, metadata: str, context: str, documents: List[UploadFile]):
     doc_list = await read_files(documents)
     metadata_dict = json.loads(metadata) if metadata else {}
@@ -220,35 +204,35 @@ async def analyze_case(case_id: str) -> dict:
 
 
 
-# def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
-#     """
-#     Sends case data and rule violations to LLM for deeper analysis & intelligent reasoning.
-#     Returns a structured LLM response with explanation.
-#     """
-#     prompt = get_llm_prompt(parsed_data, violations)
+def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
+    """
+    Sends case data and rule violations to LLM for deeper analysis & intelligent reasoning.
+    Returns a structured LLM response with explanation.
+    """
+    prompt = get_llm_prompt(parsed_data, violations)
 
-#     try:
-#         response = openai.ChatCompletion.create(
-#             model="gpt-4",  # You can swap for "gpt-4o", "gpt-3.5-turbo", or "mistral" if custom
-#             messages=[
-#                 {"role": "system", "content": "You are an intelligent fraud/error analysis assistant."},
-#                 {"role": "user", "content": prompt}
-#             ],
-#             temperature=0.3,
-#             max_tokens=800
-#         )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # You can swap for "gpt-4o", "gpt-3.5-turbo", or "mistral" if custom
+            messages=[
+                {"role": "system", "content": "You are an intelligent fraud/error analysis assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
 
-#         result = response["choices"][0]["message"]["content"]
-#         return {
-#             "status": "success",
-#             "llm_output": result
-#         }
+        result = response["choices"][0]["message"]["content"]
+        return {
+            "status": "success",
+            "llm_output": result
+        }
 
-#     except Exception as e:
-#         return {
-#             "status": "error",
-#             "message": str(e)
-#         }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
     
 
 # def process_case_for_analysis(case_id: str, parsed_data: dict) -> dict:
@@ -319,13 +303,14 @@ async def process_case_for_analysis(case_input: dict):
     files = case_input.get("documents", [])
 
     extracted_fields = await parse_uploaded_files(files)
-    metadata.update(extracted_fields)
+    metadata["parsed_documents"] = extracted_fields
 
     rule_result = apply_rules_to_case(metadata)
     # llm_result = call_llm_for_analysis(metadata)
     rules = get_all_rules()
+    # print("Rules fetched:", rules)
 
-    llm_result = call_llm_for_analysis(metadata, rules)
+    llm_result = simulate_llm_logic(metadata, rules)
 
     case_record = {}
     case_record["llm_review"] = {
@@ -385,4 +370,24 @@ async def process_admin_training_case(case_data):
         "llm_reasoning": audit_report["reasoning"],
         "case_data": case_data,
         "awaiting_admin_feedback": True
+    }
+
+
+def call_llm_for_analysis_admin(parsed_data: dict, admin_verdict: str) -> dict:
+    # Step 1: Apply rules
+    rule_results = apply_rules_to_case(parsed_data)
+
+    # Step 2: Ask LLM for its opinion
+    llm_verdict, llm_reason = query_llm(parsed_data, rule_results)
+
+    # Step 3: Compare with admin's original label
+    is_conflict = (llm_verdict != admin_verdict.lower())
+
+    # Step 4: Return structured audit result
+    return {
+        "llm_verdict": llm_verdict,
+        "llm_reason": llm_reason,
+        "admin_verdict": admin_verdict,
+        "conflict_flag": is_conflict,
+        "rule_results": rule_results
     }

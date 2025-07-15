@@ -1,5 +1,3 @@
-import json
-from typing import Union
 from fastapi import UploadFile
 
 from fastapi import UploadFile

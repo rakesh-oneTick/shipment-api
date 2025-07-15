@@ -1,7 +1,4 @@
 # models/case_model.py
-
-from fastapi import UploadFile
-# from typing import Optional
 from pydantic import BaseModel
 
 # class CaseInput(BaseModel):
@@ -15,7 +12,6 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from typing import List, Optional
-# from app.models.case_model import AdminFeedback  # if separate
 
 class CaseInput(BaseModel):
     ...

@@ -73,19 +73,16 @@ class CaseUploadRequest(BaseModel):
     case_id: Optional[str] = None
     metadata: Optional[dict] = None
     context: Optional[str] = None
+    documents: Optional[List[UploadFile]] = None
 
 # user_routes.py
 
 # from fastapi import APIRouter, UploadFile
 from app.models.case_model import  CaseUploadData
 from app.services.ai_service import process_case_for_analysis
-from app.services.llm_engine import call_llm_for_analysis
+from app.services.ai_service import call_llm_for_analysis
 from app.utils.mongo_helper import attach_llm_result_to_case
-
-# router = APIRouter()
-
-# @router.post("/upload_case/")
-# async def upload_case(case_input: CaseInput):
+import json
 
 @router.post("/upload_case/")
 async def upload_case(    case_id: str = Form(...),
@@ -95,16 +92,22 @@ async def upload_case(    case_id: str = Form(...),
     documents: List[UploadFile] = File(...)
        ):
     
-    import json
-    from app.models.case_model import CaseInput
+    case_input = {
+        "case_id": case_id,
+        "user_id": user_id,
+        "context": context,
+        "metadata": json.loads(metadata) if metadata else {},
+        "documents": documents  # Read file content
+    }
 
-    case_input = CaseUploadData(
-        case_id=case_id,
-        user_id=user_id,
-        context=context,
-        metadata=json.loads(metadata) if metadata else {},
-        documents=documents
-    )
+    # case_input = CaseUploadData(
+    #     case_id=case_id,
+    #     user_id=user_id,
+    #     context=context,
+    #     metadata=json.loads(metadata) if metadata else {},
+    #     documents=documents
+    # )
+
     # Step 1: Process and store case
     case_id = await process_case_for_analysis(case_input)
 
@@ -122,9 +125,6 @@ async def upload_case(    case_id: str = Form(...),
     }
 
 
-# from fastapi import APIRouter
-
-# router = APIRouter()
 
 @router.get("/user/case_result/{case_id}")
 def get_user_case_result(case_id: str):

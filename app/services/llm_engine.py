@@ -60,7 +60,7 @@ from app.utils.mongo_helper import fetch_recent_feedback_entries
 Rule = Dict[str, Any]
 
 
-def call_llm_for_analysis(parsed_data: dict, rules: List[Rule]) -> dict:
+def simulate_llm_logic(parsed_data: dict, rules: List[Rule]) -> dict:
     """
     Runs LLM logic on the parsed data and rule set.
     Returns result dict: { is_suspicious: bool, explanation: str }

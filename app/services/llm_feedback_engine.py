@@ -8,6 +8,8 @@ client = MongoClient("mongodb://localhost:27017")
 db = client["case_management"]
 feedback_collection = db["llm_feedback"]
 
+
+# This method is not used anywhere in the code
 def record_feedback(case_id: str, original_ai_label: str, admin_label: str, rationale: str = ""):
     """
     Stores admin feedback on AI decision.
