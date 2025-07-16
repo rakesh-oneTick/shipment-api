@@ -1,9 +1,11 @@
+from bson import ObjectId
 from pymongo import MongoClient
 from datetime import datetime
 from fastapi import UploadFile
 from typing import List, Optional
 
 from pymongo import DESCENDING
+from app.models.case_model import AdminFeedback
 from app.models.rule_model import RuleResult
 
 # 🔌 Setup Mongo client (make sure it's consistent with other parts of your app)
@@ -13,6 +15,7 @@ parsed_cases_collection = db["parsed_cases"]
 rules_collection = db["reference_rules"]  # Assuming you have a collection for rules
 cases_collection = db["uploaded_cases"]
 training_collection = db["training_cases"]
+pending_training_collection = db["pending_training_cases"]  # Assuming this is where you store training cases
 
 
 #  This is a sample function to fetch all rules from the database.
@@ -23,10 +26,13 @@ def get_all_rules():
 
 
 def get_case_data_by_id(case_id: str):
-    """
-    Fetch a single case from MongoDB by its case_id
-    """
-    return cases_collection.find_one({"case_id": case_id})
+    try:
+        object_id = ObjectId(case_id)  # Convert string to ObjectId
+    except Exception as e:
+        print(f"Invalid case_id format: {e}")
+        return None
+
+    return cases_collection.find_one({"_id": object_id})
 
 
 
@@ -50,8 +56,8 @@ async def store_case_metadata(
         "user_id": user_id,
         "context": context,
         "metadata": metadata,
-        "upload_time": datetime.utcnow(),
-        "documents": []
+        "documents": [],
+        "upload_time": datetime.utcnow()
     }
 
     if documents:
@@ -98,24 +104,29 @@ def fetch_recent_feedback_entries(limit: int = 20):
 
 
 # used in upload_case in app/routes/user_routes.py
-def attach_llm_result_to_case(case_id: str, result: RuleResult):
+def attach_llm_result_to_case(case_id: str, result: dict):
     cases_collection.update_one(
         {"case_id": case_id},
         {"$set": {
             "llm_result": {
-                "passed": result.passed,
-                "reason": result.reason
+                "passed": result.get("passed", "Will be updated later"),
+                "reason": result.get("reason", "LLM Reason")
             }}
         }
     )
 
 
-def add_admin_feedback(case_id: str, feedback: dict):
-    feedback["timestamp"] = datetime.utcnow().isoformat()
+
+def add_admin_feedback(case_id: str, feedback: AdminFeedback):
+    feedback_dict = feedback.dict()  # convert Pydantic model to dict
+    feedback_dict["timestamp"] = datetime.utcnow().isoformat()
+
     result = cases_collection.update_one(
-        {"case_id": case_id},
-        {"$set": {"admin_feedback": feedback}}
+        {"_id": case_id},
+        {"$set": {"admin_feedback": feedback_dict}}
     )
+
+    print(f"result : {result} {result.modified_count} modified")
     return result.modified_count
 
 
@@ -127,25 +138,35 @@ def store_llm_feedback(feedback_data: dict):
 def get_all_cases() -> list:
     return list(cases_collection.find({}))
 
-def store_case_with_audit(case_id: str,
-                        #   uploader: str,
+def store_case_with_audit(user_id: str,
+                          metadata: Optional[dict],
+                          context: str,
                           parsed_data: dict,
-                          rule_results: dict,
-                          llm_verdict: str,
-                          llm_reason: str):
+                        #   rule_result: dict,
+                          llm_result: str,
+                          verdict: str):
     
     record = {
-        "case_id": case_id,
-        # "uploader": uploader,
+        "user_id": user_id,
+        "metadata": metadata,
+        "context": context,
         "parsed_data": parsed_data,
-        "rule_results": rule_results,
+        # "rule_result": rule_result,
         "ai_verdict": {
-            "decision": llm_verdict,
-            "reason": llm_reason
+            "decision": verdict,
+            "reason": llm_result
         },
         "audited_by_ai": True,
         "timestamp": datetime.utcnow()
     }
 
     result = training_collection.insert_one(record)
+    return str(result.inserted_id)
+
+
+
+# ✅ NEW: Insert into pending_training_cases (for LLM-flagged cases)
+def store_pending_training_case(case_data: dict) -> str:
+    # collection = pending_training_collection["pending_training_cases"]
+    result = pending_training_collection.insert_one(case_data)
     return str(result.inserted_id)

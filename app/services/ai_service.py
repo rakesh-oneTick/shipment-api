@@ -305,7 +305,7 @@ async def process_case_for_analysis(case_input: dict):
     extracted_fields = await parse_uploaded_files(files)
     metadata["parsed_documents"] = extracted_fields
 
-    rule_result = apply_rules_to_case(metadata)
+    rule_result = apply_rules_to_case(extracted_fields)
     # llm_result = call_llm_for_analysis(metadata)
     rules = get_all_rules()
     # print("Rules fetched:", rules)
@@ -320,7 +320,12 @@ async def process_case_for_analysis(case_input: dict):
         "admin_feedback": None
     }
 
-    store_case_metadata(case_input["case_id"], case_input["user_id"], metadata, rule_result, llm_result)
+    await store_case_metadata(
+        user_id=case_input["user_id"],
+        context=case_input.get("context"),
+        metadata=metadata,
+        documents=case_input.get("documents", [])
+    )
 
     return {
         "status": "completed",
@@ -389,5 +394,5 @@ def call_llm_for_analysis_admin(parsed_data: dict, admin_verdict: str) -> dict:
         "llm_reason": llm_reason,
         "admin_verdict": admin_verdict,
         "conflict_flag": is_conflict,
-        "rule_results": rule_results
+        # "rule_results": rule_results
     }

@@ -49,3 +49,12 @@ class CaseUploadData(BaseModel):
     context: Optional[str] = None
     metadata: Optional[dict] = None
     documents: Optional[List[str]] = None
+
+
+class CaseInputWithDocuments(BaseModel):
+    case_id: str
+    user_id: str
+    metadata: Optional[dict] = None
+    context: Optional[str] = None
+    documents: Optional[List[str]] = None  # List of document paths or IDs
+    admin_feedback: Optional[AdminFeedback] = None  # Admin feedback if available

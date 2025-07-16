@@ -8,3 +8,5 @@ pylance
 BaseModel
 python-dotenv
 openai
+pandas
+openpyxl

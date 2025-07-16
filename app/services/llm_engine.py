@@ -72,11 +72,21 @@ def simulate_llm_logic(parsed_data: dict, rules: List[Rule]) -> dict:
 
     # Example simple logic
     for rule in rules:
-        if rule["field"] in parsed_data:
-            if not parsed_data[rule["field"]].startswith(rule["expected_start"]):
+        field = rule.get("field")
+        expected_start = rule.get("expected_start", "")
+        description = rule.get("description", "No description provided")
+
+        # 💥 If field is missing, skip the rule
+        if not field:
+            continue
+
+        if field in parsed_data:
+            field_value = parsed_data[field]
+            if not str(field_value).startswith(expected_start):
                 suspicious = True
-                explanation = f"{rule['field']} failed rule: {rule['description']}"
+                explanation = f"{field} failed rule: {description}"
                 break
+
 
     return {
         "is_suspicious": suspicious,

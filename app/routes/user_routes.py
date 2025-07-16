@@ -120,14 +120,15 @@ async def upload_case(    case_id: str = Form(...),
     return {
         "status": "uploaded and analyzed",
         "case_id": case_id,
-        "llm_decision": "Passed ✅" if llm_result.passed else "Flagged ⚠️",
-        "reason": llm_result.reason
+        "llm_decision": "Passed ✅" if llm_result.get("passed", False) else "Flagged ⚠️",
+        "reason": llm_result.get("reason", "No explanation provided")
     }
 
 
 
 @router.get("/user/case_result/{case_id}")
 def get_user_case_result(case_id: str):
+    
     result = get_case_data_by_id(case_id)
     if result:
         return {
@@ -141,3 +142,4 @@ def get_user_case_result(case_id: str):
         }
     else:
         return {"status": "error", "message": "Case not found"}
+
