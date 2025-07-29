@@ -1,4 +1,5 @@
 # models/case_model.py
+from fastapi import UploadFile
 from pydantic import BaseModel
 
 # class CaseInput(BaseModel):
@@ -50,11 +51,10 @@ class CaseUploadData(BaseModel):
     metadata: Optional[dict] = None
     documents: Optional[List[str]] = None
 
-
 class CaseInputWithDocuments(BaseModel):
-    case_id: str
-    user_id: str
+    case_id: Optional[str]
+    user_id: Optional[str]
     metadata: Optional[dict] = None
     context: Optional[str] = None
-    documents: Optional[List[str]] = None  # List of document paths or IDs
-    admin_feedback: Optional[AdminFeedback] = None  # Admin feedback if available
+    documents: Optional[List[str]] = None  # Will store filenames
+    admin_feedback: Optional[str] = None

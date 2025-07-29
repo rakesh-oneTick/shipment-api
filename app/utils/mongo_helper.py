@@ -50,25 +50,27 @@ async def store_case_metadata(
     user_id: str,
     context: Optional[str],
     metadata: Optional[dict],
-    documents: Optional[List[UploadFile]]
+    # documents: Optional[List[UploadFile]],
+    extracted_fields: Optional[dict] = None
 ) -> str:
     case_record = {
         "user_id": user_id,
         "context": context,
         "metadata": metadata,
-        "documents": [],
+        # "documents": [],
+        "parsed_data": extracted_fields or {},
         "upload_time": datetime.utcnow()
     }
 
-    if documents:
-        for file in documents:
-            contents = await file.read()
-            case_record["documents"].append({
-                "filename": file.filename,
-                "content_type": file.content_type,
-                "size": len(contents),
-                "note": "Stored in blob/storage (future implementation)"
-            })
+    # if documents:
+    #     for file in documents:
+    #         contents = await file.read()
+    #         case_record["documents"].append({
+    #             "filename": file.filename,
+    #             "content_type": file.content_type,
+    #             "size": len(contents),
+    #             "note": "Stored in blob/storage (future implementation)"
+    #         })
 
     result = cases_collection.insert_one(case_record)
     return str(result.inserted_id)
@@ -79,10 +81,12 @@ def get_training_cases(limit=50):
     Fetch past admin-uploaded cases for training.
     Assumes these are marked with a special 'is_training_data': True flag.
     """
-    training_cases = cases_collection.find(
-        {"is_training_data": True},
-        {"_id": 0, "metadata": 1, "llm_feedback": 1, "rule_matches": 1}
-    ).limit(limit)
+    # training_cases = cases_collection.find(
+    #     {"is_training_data": True},
+    #     {"_id": 0, "metadata": 1, "llm_feedback": 1, "rule_matches": 1}
+    # ).limit(limit)
+
+    training_cases = training_collection.find({})
 
     return list(training_cases)
 
@@ -105,12 +109,14 @@ def fetch_recent_feedback_entries(limit: int = 20):
 
 # used in upload_case in app/routes/user_routes.py
 def attach_llm_result_to_case(case_id: str, result: dict):
+
+    object_id = ObjectId(case_id)  # Convert string to ObjectId
     cases_collection.update_one(
-        {"case_id": case_id},
+        {"_id": object_id},
         {"$set": {
             "llm_result": {
-                "passed": result.get("passed", "Will be updated later"),
-                "reason": result.get("reason", "LLM Reason")
+                "decision": result.get("decision"),
+                "reason": result.get("reason")
             }}
         }
     )
@@ -144,6 +150,7 @@ def store_case_with_audit(user_id: str,
                           parsed_data: dict,
                         #   rule_result: dict,
                           llm_result: str,
+                          admin_feedback:Optional[str],
                           verdict: str):
     
     record = {
@@ -156,7 +163,9 @@ def store_case_with_audit(user_id: str,
             "decision": verdict,
             "reason": llm_result
         },
+        "admin_feedback": admin_feedback or {},
         "audited_by_ai": True,
+        "status":"finalized",
         "timestamp": datetime.utcnow()
     }
 
@@ -169,4 +178,27 @@ def store_case_with_audit(user_id: str,
 def store_pending_training_case(case_data: dict) -> str:
     # collection = pending_training_collection["pending_training_cases"]
     result = pending_training_collection.insert_one(case_data)
+    return str(result.inserted_id)
+
+
+def store_existing_case_with_admin_feedback(case: dict):
+    """
+    Store the case data from pending_training_cases along with admin feedback and LLM audit info into training_collection.
+    """
+    record = {
+        "case_id": case.get("case_id"),
+        "user_id": case.get("user_id"),
+        "parsed_data": case.get("parsed_data"),
+        "metadata": case.get("metadata", {}),
+        "context": case.get("context", ""),
+        "llm_verdict": case.get("llm_verdict", "unknown"),
+        "llm_reason": case.get("llm_reason", "No reason provided"),
+        "admin_verdict": case.get("admin_verdict", "pending"),
+        "admin_reason": case.get("admin_reason", "No reason provided"),
+        "timestamp": case.get("timestamp", datetime.utcnow()),
+        "finalized_timestamp": case.get("finalized_timestamp", datetime.utcnow()),
+        "status": "finalized"
+    }
+
+    result = training_collection.insert_one(record)
     return str(result.inserted_id)

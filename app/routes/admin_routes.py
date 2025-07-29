@@ -1,12 +1,13 @@
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Form, UploadFile, File
 from typing import List, Optional
 
 from pymongo import MongoClient
 from app.models.case_model import AdminFeedback,CaseInputWithDocuments
 from app.services.ai_service import call_llm_for_analysis_admin
+from app.services.extract_data_from_excel import safe_json_parse
 from app.services.file_parser import parse_document
-from app.utils.mongo_helper import get_case_data_by_id, insert_case_data, store_pending_training_case  # We assume this exists to save parsed case
+from app.utils.mongo_helper import get_case_data_by_id, insert_case_data, store_existing_case_with_admin_feedback, store_pending_training_case 
 
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -18,6 +19,8 @@ from typing import List, Optional
 from app.services.file_parser import parse_uploaded_files
 from app.utils.mongo_helper import store_case_with_audit
 from app.services.ai_service import apply_rules_to_case
+from app.utils.logger import logger
+from bson import ObjectId
 
 client = MongoClient("mongodb://localhost:27017")
 db = client["case_management"]
@@ -28,73 +31,53 @@ router = APIRouter()
 
 
 
-# ✅ File: admin_routes.py
-
-# from fastapi import APIRouter, UploadFile, Form
-# from typing import Optional, List
-# from app.services.file_parser import parse_uploaded_files
-# from app.utils.mongo_helper import store_case_with_audit
-# import json
-
-# router = APIRouter()
-
-# @router.post("/upload_training_case/")
-# async def upload_training_case(
-#     user_id: str = Form(...),
-#     case_type: str = Form(...),  # "good" or "bad"
-#     files: Optional[List[UploadFile]] = None,
-#     metadata: Optional[str] = Form(None),  # JSON string if coming via frontend form
-#     context: Optional[str] = Form(None)
-# ):
-#     # Step 1: Parse uploaded files (PDFs, images, etc.)
-#     parsed_data = await parse_uploaded_files(files)
-
-#     # Step 2: Load metadata (e.g., from Excel)
-#     metadata_dict = json.loads(metadata) if metadata else {}
-
-#     # Step 3: Apply rules
-#     rule_result = apply_rules_to_case(parsed_data)
-
-#     # Step 4: Call LLM to analyze for suspiciousness
-#     llm_result = call_llm_for_analysis_admin(parsed_data,case_type)
-
-#     # Step 5: Store the full case with LLM audit
-#     result = store_case_with_audit(
-#         user_id=user_id,
-#         metadata=metadata_dict,
-#         parsed_data=parsed_data,
-#         context=context,
-#         # rule_result=rule_result,
-#         llm_result=llm_result,
-#         verdict=case_type
-#     )
-
-#     return {"status": "success", "mongo_id": result}
-
-
 @router.post("/upload_training_case")
-async def upload_training_case(case: CaseInputWithDocuments):
+async def upload_training_case(
+    case_id: Optional[str] = Form(None),
+    user_id: Optional[str] = Form(None),
+    metadata: Optional[str] = Form(None),     # Expect JSON string
+    context: Optional[str] = Form(None),
+    admin_feedback: Optional[str] = Form(None),  # Expect JSON string
+    documents: List[UploadFile] = File(...)
+):
+    
+    metadata_dict = safe_json_parse(metadata)
+
+
+    case = CaseInputWithDocuments(
+        case_id=case_id,
+        user_id=user_id,
+        metadata=metadata_dict,
+        context=context,
+        documents=[file.filename for file in documents],  # Save if needed
+        admin_feedback=admin_feedback
+    )
+
     # 1. Parse data (could be Excel, image, etc.)
-    parsed_data = parse_uploaded_files(case.documents)
+    parsed_data = await parse_uploaded_files(documents)
+    print(f"Parsed data sent to LLM: {parsed_data}")
     
     # 2. Apply rules
-    rule_result = apply_rules_to_case(parsed_data)
+    # rule_result = apply_rules_to_case(parsed_data)
+
+    # logger.warning(f"Rule result: {rule_result}")
 
     # 3. Call LLM for deeper reasoning
-    llm_result = call_llm_for_analysis_admin(parsed_data, rule_result)
+    llm_result = call_llm_for_analysis_admin(parsed_data, case.metadata.get("label", "").lower())
 
     # 4. If admin said it's "good", but LLM finds issues
-    if case.metadata.get("label") == "good" and llm_result.get("verdict") == "bad":
+    if case.metadata.get("label") == "good" and llm_result.get("llm_verdict") == "bad":
         # Attach everything + explanation + original label
         flagged_case = {
             "case_id": case.case_id,
             "user_id": case.user_id,
             "parsed_data": parsed_data,
-            "admin_label": "good",
-            "llm_verdict": "bad",
-            "llm_reason": llm_result.get("reason"),
+            "admin_label": case.metadata.get("label"),
+            "llm_verdict": llm_result.get("llm_verdict"),
+            "llm_reason": llm_result.get("llm_reason"),
             "timestamp": datetime.utcnow(),
-            "status": "pending_admin_feedback"
+            "status": "pending_admin_feedback",
+            "admin_feedback": case.admin_feedback or {},
         }
 
         # 5. Store in pending collection
@@ -104,23 +87,20 @@ async def upload_training_case(case: CaseInputWithDocuments):
             "status": "flagged",
             "message": "LLM flagged this 'good' case as potentially bad.",
             "pending_case_id": pending_id,
-            "llm_reason": llm_result.get("reason")
+            "llm_reason": llm_result.get("llm_reason")
         }
 
-    # 6. Otherwise — store as normal training case
-    full_record = {
-        "case_id": case.case_id,
-        "user_id": case.user_id,
-        "parsed_data": parsed_data,
-        # "rules": rule_result,
-        "llm_analysis": llm_result,
-        "label": case.metadata.get("label"),
-        "timestamp": datetime.utcnow()
-    }
+    mongo_id = store_case_with_audit(
+    user_id=case.user_id,
+    metadata=case.metadata,
+    context=case.context or "",  # if context is None
+    parsed_data=parsed_data,
+    admin_feedback=case.admin_feedback or "",
+    llm_result=llm_result.get("llm_reason"),
+    verdict=llm_result.get("llm_verdict"),
+    )
 
-    mongo_id = store_case_with_audit(full_record)
-
-    return {"status": "success", "mongo_id": mongo_id}
+    return {"status": "success", "mongo_id": mongo_id,"llm_reason":llm_result.get("llm_reason"),"llm_result":llm_result.get("llm_verdict")}
 
 
 # We are not using this route anymore, but keeping it for reference
@@ -199,13 +179,6 @@ def feedback_on_case(case_id: str, feedback: AdminFeedback):
 
 
 
-# This route is duplicate
-# @router.post("/admin/submit_feedback")
-# def submit_feedback(feedback: LLMFeedback):
-#     store_llm_feedback(feedback.dict())
-#     return {"status": "success", "message": "Feedback recorded"}
-
-
 @router.get("/admin/case_dashboard")
 def get_admin_case_dashboard():
     cases = get_all_cases()
@@ -235,6 +208,7 @@ def get_pending_training_cases():
 
 #  
 class AdminTrainingFeedback(BaseModel):
+    pending_case_id:str 
     case_id: str
     verdict: str  # either "agree_with_llm" or "override"
     reason: Optional[str] = None  # required if override
@@ -243,20 +217,21 @@ class AdminTrainingFeedback(BaseModel):
 
 @router.post("/submit_training_feedback")
 def submit_training_feedback(feedback: AdminTrainingFeedback):
-    case = pending_training_cases.find_one({"case_id": feedback.case_id})
+    logger.info(f"Received training feedback for case {feedback.case_id}: {feedback.verdict}, reason: {feedback.reason}")
+    pending_case_id = ObjectId(feedback.pending_case_id)
+    case = pending_training_cases.find_one({"_id": pending_case_id})
+    logger.info(f"Found case: {case}")
+
     if not case:
+        logger.error(f"Case {feedback.case_id} not found in pending queue")
         return {"status": "error", "message": "Case not found in pending queue."}
 
-    # Add admin verdict to record
     case["admin_verdict"] = feedback.verdict
     case["admin_reason"] = feedback.reason
     case["finalized_timestamp"] = datetime.utcnow()
 
-    # Insert into final training cases DB
-    # store_case_metadata(case)
-    store_case_with_audit(case)
+    store_existing_case_with_admin_feedback(case)
 
-    # Remove from pending queue
-    pending_training_cases.delete_one({"case_id": feedback.case_id})
+    pending_training_cases.delete_one({"_id": pending_case_id})
 
     return {"status": "success", "message": "Feedback recorded and case finalized."}

@@ -7,6 +7,8 @@ from typing import Optional, List
 from fastapi import UploadFile
 # AI + Sanity Audit Service
 import openai  # Make sure to install openai package if not already
+from app.models.rule_model import get_all_rules_for_org
+from app.services.extract_data_from_excel import extract_text_from_docx
 from app.services.llm_model import query_llm
 from config import OPENAI_API_KEY
     
@@ -16,14 +18,19 @@ from app.utils.mongo_helper import get_all_rules, get_case_data_by_id
 
 from .llm_engine import simulate_llm_logic
 import os
-import openai  # Make sure openai package is installed
 from app.utils.prompt_templates import get_llm_prompt
 from .rule_engine import apply_rules_to_case
 from .file_parser import parse_uploaded_files
 from app.utils.mongo_helper import store_case_metadata
+from app.utils.logger import logger
+import re
 
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+from openai import OpenAI
+
+openai_client = OpenAI()
 
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
@@ -99,16 +106,28 @@ async def process_bulk_upload(uploader_id: str, metadata_file: UploadFile, docum
     case_id = store_case_record(case)
     return {"status": "success", "case_id": case_id}
 
+
+
 async def process_rule_definition(rule_name: str, rule_type: str, source: str, reference_file: UploadFile, text_input: str):
-    ref_doc = await reference_file.read() if reference_file else None
+    extracted = None
+    if reference_file:
+        file_bytes = await reference_file.read()
+        if reference_file.filename.lower().endswith(".docx"):
+            extracted = extract_text_from_docx(file_bytes)
+        else:
+            logger.error(f"Unsupported file type: {reference_file.filename}")
+            extracted = "Unsupported or no File provided"
+
     rule = {
         "rule_name": rule_name,
         "rule_type": rule_type,
         "source": source,
-        "reference_note": "Stored externally",
+        "reference_note": "Stored externally" if reference_file else None,
+        "reference_text": extracted,
         "rule_text": text_input,
         "upload_time": datetime.utcnow()
     }
+
     rules_col.insert_one(rule)
     return {"status": "success", "message": "Rule defined and stored."}
 
@@ -204,27 +223,34 @@ async def analyze_case(case_id: str) -> dict:
 
 
 
-def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
-    """
-    Sends case data and rule violations to LLM for deeper analysis & intelligent reasoning.
-    Returns a structured LLM response with explanation.
-    """
-    prompt = get_llm_prompt(parsed_data, violations)
-
+def call_llm_for_analysis(parsed_data: dict, violations: list = [],training_cases:list=[]) -> dict:
+    prompt = get_llm_prompt(parsed_data, violations,training_cases)
+    
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",  # You can swap for "gpt-4o", "gpt-3.5-turbo", or "mistral" if custom
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",  # or "gpt-4", "gpt-3.5-turbo"
             messages=[
                 {"role": "system", "content": "You are an intelligent fraud/error analysis assistant."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=800
+            temperature=0.2,
+            # max_tokens=800
         )
 
-        result = response["choices"][0]["message"]["content"]
+        result = response.choices[0].message.content
+
+        # Extract Decision
+        decision_match = re.search(r"Decision:\s*(Accept|Reject)", result, re.IGNORECASE)
+        decision = decision_match.group(1).capitalize() if decision_match else "Unknown"
+
+        # Extract Reason
+        reason_match = re.search(r"Issue:\s*(.*)", result, re.IGNORECASE | re.DOTALL)
+        reason = reason_match.group(1).strip() if reason_match else result.replace(f"Decision: {decision}", "").strip()
+
         return {
             "status": "success",
+            "decision": decision,
+            "reason": reason,
             "llm_output": result
         }
 
@@ -233,6 +259,8 @@ def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
             "status": "error",
             "message": str(e)
         }
+
+
     
 
 # def process_case_for_analysis(case_id: str, parsed_data: dict) -> dict:
@@ -299,10 +327,12 @@ def call_llm_for_analysis(parsed_data: dict, violations: list = []) -> dict:
 # from services.file_parser import parse_uploaded_files
 
 async def process_case_for_analysis(case_input: dict):
+    logger.info(f"Processing case for analysis: {case_input.get('case_id', 'unknown')}")
     metadata = case_input.get("metadata", {})
     files = case_input.get("documents", [])
 
     extracted_fields = await parse_uploaded_files(files)
+    logger.info(f"Extracted fields: {extracted_fields}")
     metadata["parsed_documents"] = extracted_fields
 
     rule_result = apply_rules_to_case(extracted_fields)
@@ -327,11 +357,12 @@ async def process_case_for_analysis(case_input: dict):
         documents=case_input.get("documents", [])
     )
 
-    return {
-        "status": "completed",
-        "rules_checked": rule_result,
-        "ai_analysis": llm_result
-    }
+    # return {
+    #     "status": "completed",
+    #     "rules_checked": rule_result,
+    #     "ai_analysis": llm_result
+    # }
+    return extracted_fields
 
 
 
@@ -379,11 +410,14 @@ async def process_admin_training_case(case_data):
 
 
 def call_llm_for_analysis_admin(parsed_data: dict, admin_verdict: str) -> dict:
+    # logger.info("Calling LLM for analysis from admin")
     # Step 1: Apply rules
-    rule_results = apply_rules_to_case(parsed_data)
+    # rule_results = apply_rules_to_case(parsed_data)
+
+    rules = get_all_rules_for_org()
 
     # Step 2: Ask LLM for its opinion
-    llm_verdict, llm_reason = query_llm(parsed_data, rule_results)
+    llm_verdict, llm_reason = query_llm(parsed_data, rules)
 
     # Step 3: Compare with admin's original label
     is_conflict = (llm_verdict != admin_verdict.lower())

@@ -1,5 +1,6 @@
 from typing import List
 from app.models.rule_model import get_all_rules_for_org
+from app.utils.logger import logger
 
 # def apply_rules_to_case(parsed_data: dict) -> list:
 #     """
@@ -43,6 +44,7 @@ from app.models.rule_model import get_all_rules_for_org
 
 def apply_rules_to_case(parsed_cases: List[dict]) -> List[dict]:
     violations = []
+    logger.info("Applying rules to parsed data")
 
     rules = get_all_rules_for_org()
 
@@ -81,3 +83,6 @@ def apply_rules_to_case(parsed_cases: List[dict]) -> List[dict]:
         })
 
     return violations
+
+
+

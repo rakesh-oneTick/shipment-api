@@ -10,3 +10,6 @@ python-dotenv
 openai
 pandas
 openpyxl
+colorlog
+python-docx
+pip install --upgrade openai
